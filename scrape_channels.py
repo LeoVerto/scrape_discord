@@ -37,7 +37,7 @@ async def on_ready():
 			channels += 1
 			
 	try:
-		client.close()
+		await client.close()
 	except:
 		pass
 		
@@ -70,7 +70,7 @@ async def scrape_logs_from(channel):
 			break
 			
 		await write_messages(messages, f_messages, f_clean_messages)
-		last = messages[0]
+		last = messages[-1]
 		total += len(messages)
 		print("%d messages scraped" % total)
 		
