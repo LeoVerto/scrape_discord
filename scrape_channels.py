@@ -50,7 +50,7 @@ async def scrape_logs_from(channel):
 	
 	log_dir = 'logs/' + channel.guild.name + '/' + TIMESTAMP_STR + '/'
 	log_prefix = f"{channel.id}_{channel.name}-"
-	log_suffix = '-log.txt'
+	log_suffix = '-log.json'
 	
 	if not os.path.exists(log_dir):
 		os.makedirs(log_dir)
