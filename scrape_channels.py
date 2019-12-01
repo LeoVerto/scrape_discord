@@ -16,44 +16,40 @@ parser.add_argument('--channels', '-c', type=str, nargs='*', help='channel ids')
 parser.add_argument('--messages', '-m', type=int, help='number of messages to fetch per request')
 parser.add_argument('--selfbot', action='store_true', help='is the connecting user a selfbot/regular user? note: should not be used')
 
-PY35 = sys.version_info >= (3, 5)
-
 SERVER_ID = ""
 CHANNELS = []
 SERVER = None
 TIMESTAMP_STR = str(int(time()))
-MESSAGES = 100 # default, use --messages or -m to change
+MESSAGES = 100  # default, use --messages or -m to change
 
 client = discord.Client()
 
+
 @client.event
-@asyncio.coroutine
-def on_ready():
+async def on_ready():
 	print('Logged in as: %s' % client.user.name)
 	print('------')
 
-	SERVER = client.get_server(SERVER_ID)
-	channels = [SERVER.get_channel(cid) for cid in CHANNELS] if CHANNELS else SERVER.channels
-	channels = list(filter(None, channels)) # Haven't encounterd a case where this is needed other than specifying incorrect channel id's
-	for channel in sorted(channels, key=lambda c: c.position):
-		if str(channel.type) == 'text' and SERVER.me.permissions_in(channel).read_message_history:
-			yield from scrape_logs_from(channel)
+	channels = 0
+	for channel in client.get_all_channels():
+		if str(channel.type) == 'text':  # and channel.permissions_for(client.user).read_message_history:
+			await scrape_logs_from(channel)
+			channels += 1
 			
 	try:
-		yield from client.close()
+		client.close()
 	except:
 		pass
 		
-	print("Finished scraping %d channel(s)." % len(channels))
-		
-@asyncio.coroutine		
-def scrape_logs_from(channel):
+	print(f"Finished scraping {channels} channel(s).")
+
+
+async def scrape_logs_from(channel):
 	all_messages = []
 	all_clean_messages = []
-	all_reactions = []
 	
-	log_dir = 'logs/' + channel.server.name + '/' + TIMESTAMP_STR + '/'
-	log_prefix = channel.id + '_' + channel.name + '-'
+	log_dir = 'logs/' + channel.guild.name + '/' + TIMESTAMP_STR + '/'
+	log_prefix = f"{channel.id}_{channel.name}-"
 	log_suffix = '-log.txt'
 	
 	if not os.path.exists(log_dir):
@@ -61,7 +57,6 @@ def scrape_logs_from(channel):
 	
 	f_messages = open(log_dir + log_prefix + 'messages' + log_suffix, mode='w')
 	f_clean_messages = open(log_dir + log_prefix + 'clean-messages' + log_suffix, mode='w')
-	f_reactions = open(log_dir + log_prefix + 'reactions' + log_suffix, mode='w')
 	
 	print('scraping logs for %s' % channel.name)
 	
@@ -69,44 +64,28 @@ def scrape_logs_from(channel):
 	total = 0
 	
 	while True:
-		
-		messages = []
-		
-		if PY35:
-			# feels like a mess, but works, clean it up later
-			log_iterator = client.logs_from(channel, after=last, limit=MESSAGES)
-			for i in range(MESSAGES):
-				try:
-					msg = yield from log_iterator.__anext__()
-				except:
-					break
-				messages.append(msg)
-				
-		else:
-			gen = yield from client.logs_from(channel, after=last, limit=MESSAGES)
-			messages = list(gen)
-		
+		messages = await channel.history(after=last, limit=MESSAGES).flatten()
+
 		if len(messages) == 0:
 			break
 			
-		yield from write_messages(messages, f_messages, f_clean_messages, f_reactions)
+		await write_messages(messages, f_messages, f_clean_messages)
 		last = messages[0]
 		total += len(messages)
 		print("%d messages scraped" % total)
 		
 	f_messages.close()
-	f_reactions.close()
 	f_clean_messages.close()
 	
 	print("\nDone writing messages for %s.\n" % channel.name)
 
-@asyncio.coroutine
-def write_messages(messages, f_messages, f_clean_messages, f_reactions):
+
+async def write_messages(messages, f_messages, f_clean_messages):
 	for message in messages[::-1]:
 		f_messages.write(json.dumps({
 			'id': message.id,
-			'timestamp': str(message.timestamp), 
-			'edited_timestamp': str(message.edited_timestamp), 
+			'timestamp': str(message.created_at),
+			'edited_timestamp': str(message.edited_at),
 			'author_id': message.author.id, 
 			'author_name': message.author.name, 
 			'content': message.content
@@ -116,28 +95,7 @@ def write_messages(messages, f_messages, f_clean_messages, f_reactions):
 			'id': message.id,
 			'clean_content': message.clean_content
 		}, sort_keys=True) + '\n')
-		
-		yield from process_reactions(message, f_reactions)
-		
-	
-@asyncio.coroutine	
-def process_reactions(message, f_reactions):
-	for reaction in message.reactions:
-		try:
-			gen = yield from client.get_reaction_users(reaction)
-			reaction_users = [user.id for user in gen]
-			
-			f_reactions.write(json.dumps({
-				'channel_name': message.channel.name,
-				'channel_id': message.channel.id,
-				'message_id': message.id,
-				'emoji': reaction.emoji if not reaction.custom_emoji else reaction.emoji.name,
-				'count': reaction.count,
-				'user_ids': reaction_users
-			}, sort_keys=True) + '\n')
-			
-		except Exception as exc:
-				print('\nException when processing reaction: {0}\n\nContinuing...\n'.format(exc))
+
 
 args = parser.parse_args()
 
@@ -146,7 +104,7 @@ if args.server_id:
 if args.channels:
 	CHANNELS = args.channels
 if args.messages:
-	if args.messages > 0 and args.messages <= 100:
+	if 0 < args.messages <= 100:
 		MESSAGES = args.messages
 	else:
 		print("Max number of messages to return (1-100), using default: %d" % MESSAGES)
